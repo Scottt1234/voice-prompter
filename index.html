@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0c0e11">
+<title>Voice Prompter</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+<style>
+/* Layout: one setup sheet, then a full-screen prompter with a fixed reading line a third of the way down. Dark only by choice: prompters are read against black. */
+:root {
+  --bg: #0c0e11;
+  --panel: #171a1f;
+  --line: #2a2f37;
+  --fg: #f3f1ea;
+  --dim: #5d6470;
+  --cue: #ffb547;
+  --tally: #ff4d4d;
+  --font: "Atkinson Hyperlegible", -apple-system, "Segoe UI", Roboto, sans-serif;
+  --fs: 40px;
+  --reading-line: 33%;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--fg); font-family: var(--font); -webkit-text-size-adjust: 100%; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--cue); outline-offset: 2px; }
+[hidden] { display: none !important; }
+
+/* Setup */
+.setup {
+  min-height: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+  padding-block: calc(env(safe-area-inset-top, 0px) + 24px) calc(env(safe-area-inset-bottom, 0px) + 24px);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; gap: 16px;
+}
+.setup h1 { font-size: 28px; margin: 0; display: flex; align-items: center; gap: 10px; }
+.setup h1 .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--tally); box-shadow: 0 0 12px var(--tally); }
+.setup p.lede { margin: 0; color: var(--dim); font-size: 16px; line-height: 1.45; }
+textarea {
+  width: 100%; min-height: 40vh; resize: vertical;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 14px; font-size: 17px; line-height: 1.5;
+}
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.btn {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 12px 16px; font-size: 16px; min-height: 48px;
+}
+.btn.primary { background: var(--cue); color: #1a1205; border-color: var(--cue); font-weight: 700; flex: 1; font-size: 18px; }
+label.field { display: flex; align-items: center; gap: 10px; font-size: 16px; color: var(--fg); }
+label.field input[type=range] { width: 140px; accent-color: var(--cue); }
+label.field input[type=checkbox] { width: 22px; height: 22px; accent-color: var(--cue); }
+select { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.note { color: var(--dim); font-size: 14px; line-height: 1.45; margin: 0; }
+.warn { color: var(--cue); font-size: 15px; line-height: 1.45; margin: 0; }
+
+/* Prompter */
+.prompter { position: fixed; inset: 0; background: var(--bg); }
+.scroller {
+  position: absolute; inset: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding-left: max(20px, env(safe-area-inset-left, 0px));
+  padding-right: max(20px, env(safe-area-inset-right, 0px));
+}
+.text {
+  max-width: 34ch; margin: 0 auto;
+  padding-top: 38vh; padding-bottom: 75vh;
+  font-size: var(--fs); line-height: 1.42; font-weight: 700;
+  overflow-wrap: break-word;
+}
+.text.mirror { transform: scaleX(-1); }
+.text p { margin: 0 0 0.8em; }
+.text span { transition: color 220ms ease; border-radius: 4px; }
+.text span.read { color: var(--dim); }
+.text span.now { color: var(--fg); box-shadow: 0 0.12em 0 var(--cue); }
+.marker {
+  position: absolute; left: 0; right: 0; top: var(--reading-line); height: 0;
+  pointer-events: none;
+}
+.marker::before, .marker::after {
+  content: ""; position: absolute; top: -10px;
+  border: 10px solid transparent;
+}
+.marker::before { left: env(safe-area-inset-left, 0px); border-left: 12px solid var(--cue); }
+.marker::after { right: env(safe-area-inset-right, 0px); border-right: 12px solid var(--cue); }
+.topbar {
+  position: absolute; top: 0; left: 0; right: 0;
+  padding-top: calc(env(safe-area-inset-top, 0px) + 8px);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-bottom: 24px;
+  background: linear-gradient(var(--bg) 55%, transparent);
+  display: flex; align-items: center; gap: 10px; font-size: 15px;
+  pointer-events: none;
+}
+.status { display: flex; align-items: center; gap: 8px; color: var(--dim); min-width: 0; }
+.status .tally { width: 10px; height: 10px; border-radius: 50%; background: var(--dim); flex: none; }
+.status.live { color: var(--fg); }
+.status.live .tally { background: var(--tally); box-shadow: 0 0 10px var(--tally); animation: pulse 1.6s ease-in-out infinite; }
+.progress { margin-left: auto; color: var(--dim); font-variant-numeric: tabular-nums; }
+@keyframes pulse { 50% { opacity: 0.45; } }
+.bar {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+  padding-left: max(12px, env(safe-area-inset-left, 0px));
+  padding-right: max(12px, env(safe-area-inset-right, 0px));
+  padding-top: 28px;
+  background: linear-gradient(transparent, var(--bg) 40%);
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+}
+.bar .group { display: flex; gap: 4px; align-items: center; }
+.icon {
+  min-width: 44px; height: 44px; padding: 0 10px; border-radius: 22px;
+  background: var(--panel); border: 1px solid var(--line); font-size: 14px;
+}
+.play {
+  width: 64px; height: 64px; border-radius: 50%; border: 0;
+  background: var(--cue); color: #1a1205; font-size: 15px; font-weight: 700;
+  display: grid; place-items: center; flex: none;
+}
+.play svg { width: 30px; height: 30px; }
+.speed { color: var(--dim); font-size: 14px; font-variant-numeric: tabular-nums; min-width: 3ch; text-align: center; }
+@media (max-width: 370px) {
+  .icon { min-width: 40px; padding: 0 8px; font-size: 13px; }
+  .play { width: 58px; height: 58px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .text span { transition: none; }
+  .status.live .tally { animation: none; }
+}
+</style>
+</head>
+<body>
+
+<main class="setup" id="setup">
+  <h1><span class="dot" aria-hidden="true"></span>Voice Prompter</h1>
+  <p class="lede">Paste your script, press Start, then press play and read aloud. The text follows your voice.</p>
+  <textarea id="script" aria-label="Script" spellcheck="false"></textarea>
+  <div class="row">
+    <button class="btn" id="loadBtn" type="button">Load .txt file</button>
+    <input id="file" type="file" accept=".txt,.md,text/plain" hidden>
+    <button class="btn" id="clearBtn" type="button">Clear</button>
+  </div>
+  <div class="row">
+    <label class="field">Text size <input id="size" type="range" min="24" max="72" step="2"></label>
+  </div>
+  <div class="row">
+    <label class="field"><input id="mirror" type="checkbox"> Mirror (for a glass prompter)</label>
+  </div>
+  <div class="row">
+    <label class="field">Accent
+      <select id="lang">
+        <option value="en-GB">English (UK)</option>
+        <option value="en-US">English (US)</option>
+        <option value="en-AU">English (Australia)</option>
+        <option value="en-IE">English (Ireland)</option>
+        <option value="en-IN">English (India)</option>
+      </select>
+    </label>
+  </div>
+  <p class="warn" id="support" hidden></p>
+  <div class="row"><button class="btn primary" id="startBtn" type="button">Start</button></div>
+  <p class="note">On iPhone, open this page in Safari, not from a home-screen icon. If listening will not start, check Settings, Safari, Microphone, and that Dictation is on. Speech is processed by Apple on iPhone and by Google in Chrome. Your script stays on this phone.</p>
+</main>
+
+<section class="prompter" id="prompter" hidden>
+  <div class="scroller" id="scroller"><div class="text" id="text"></div></div>
+  <div class="marker" aria-hidden="true"></div>
+  <div class="topbar">
+    <div class="status" id="status"><span class="tally"></span><span id="statusText">Paused</span></div>
+    <div class="progress" id="progress">0%</div>
+  </div>
+  <div class="bar">
+    <div class="group">
+      <button class="icon" id="backBtn" type="button" aria-label="Edit script">Edit</button>
+      <button class="icon" id="topBtn" type="button" aria-label="Back to start">Top</button>
+    </div>
+    <button class="play" id="playBtn" type="button" aria-label="Play">
+      <svg id="playIcon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+      <svg id="pauseIcon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" hidden><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
+    </button>
+    <div class="group">
+      <button class="icon" id="modeBtn" type="button" aria-label="Switch mode">Voice</button>
+      <button class="icon" id="slowerBtn" type="button" aria-label="Smaller text" data-voice="A−" data-manual="−">A−</button>
+      <button class="icon" id="fasterBtn" type="button" aria-label="Larger text" data-voice="A+" data-manual="+">A+</button>
+    </div>
+  </div>
+</section>
+
+<script>
+// MATCHER START
+// Pure functions: where in the script is the speaker now?
+function normWord(w) {
+  return w.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]/g, "");
+}
+function tokenize(text) {
+  return text.split(/[\s—–\-\/]+/).map(normWord).filter(Boolean);
+}
+function lev(a, b) {
+  if (a === b) return 0;
+  const m = a.length, n = b.length;
+  if (!m) return n; if (!n) return m;
+  let prev = new Array(n + 1), cur = new Array(n + 1);
+  for (let j = 0; j <= n; j++) prev[j] = j;
+  for (let i = 1; i <= m; i++) {
+    cur[0] = i;
+    for (let j = 1; j <= n; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    [prev, cur] = [cur, prev];
+  }
+  return prev[n];
+}
+function sim(a, b) {
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  return 1 - lev(a, b) / Math.max(a.length, b.length);
+}
+// Short words ("a", "the") appear everywhere, so they count for less.
+function weight(w) { return w.length <= 2 ? 0.45 : w.length === 3 ? 0.7 : 1; }
+function pairScore(heard, said) {
+  const s = sim(heard, said);
+  return s >= 0.72 ? 2 * s * weight(said) : -0.9;
+}
+// Local alignment of the last few heard words against the script just ahead of the cursor.
+// Copes with skipped words, ad-libs, and names split or merged by the recogniser.
+// Returns the new cursor (index of the next unread word). Never moves backwards.
+function advance(script, cursor, tail) {
+  const T = tail.slice(-8), m = T.length;
+  if (!m || cursor >= script.length) return cursor;
+  const lo = Math.max(0, cursor - 3), hi = Math.min(script.length, cursor + 60);
+  const S = script.slice(lo, hi), n = S.length;
+  const H = [];
+  for (let i = 0; i <= m; i++) H.push(new Float64Array(n + 1));
+  let best = 0, bestJ = -1;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      let v = H[i - 1][j - 1] + pairScore(T[i - 1], S[j - 1]);
+      v = Math.max(v, H[i - 1][j] - 0.5, H[i][j - 1] - 0.7);
+      if (i >= 2) v = Math.max(v, H[i - 2][j - 1] + pairScore(T[i - 2] + T[i - 1], S[j - 1]));
+      if (j >= 2) v = Math.max(v, H[i - 1][j - 2] + pairScore(T[i - 1], S[j - 2] + S[j - 1]));
+      H[i][j] = Math.max(0, v);
+      const idx = lo + j - 1;
+      const ahead = Math.max(0, idx - cursor);
+      const score = H[i][j] - 0.04 * ahead - 0.25 * (m - i);
+      if (score > best) { best = score; bestJ = idx; }
+    }
+  }
+  if (bestJ < 0) return cursor;
+  const jump = bestJ + 1 - cursor;
+  const ok = best >= 3 || (best >= 1.5 && jump <= 2);
+  if (!ok || (jump > 25 && best < 5)) return cursor;
+  return Math.max(cursor, bestJ + 1);
+}
+// MATCHER END
+
+const $ = (id) => document.getElementById(id);
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
+};
+
+const SAMPLE = `This is a sample script. Replace it with your own.
+
+Press play and start reading aloud. As you speak, the words you have read fade and the text moves up to keep your place on the yellow line.
+
+Read faster and it keeps up. Slow down or pause and it waits for you. If you go off script for a moment, it holds still, then finds you again when you come back to the words.
+
+Tap the screen to pause. While paused, tap any word to jump there.`;
+
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const scroller = $("scroller"), textEl = $("text");
+let words = [];         // one entry per matchable word: { el, norm }
+let norms = [];
+let cursor = 0, shownCursor = -1;
+let playing = false;
+let mode = SR ? "voice" : "manual";
+let speed = store.get("vp.speed", 60);   // manual mode, pixels per second
+let fs = store.get("vp.size", 40);
+let rec = null, wantListening = false, carry = [], heard = [];
+let userMoved = false, wakeLock = null;
+
+// Setup
+$("script").value = store.get("vp.script", SAMPLE);
+$("size").value = fs;
+$("mirror").checked = store.get("vp.mirror", false);
+$("lang").value = store.get("vp.lang", "en-GB");
+if (!SR) {
+  $("support").hidden = false;
+  $("support").textContent = "This browser cannot listen. Use Safari on iPhone or Chrome on Android. Manual scrolling still works.";
+}
+$("loadBtn").onclick = () => $("file").click();
+$("file").onchange = (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = () => { $("script").value = r.result; store.set("vp.script", r.result); };
+  r.readAsText(f);
+};
+$("clearBtn").onclick = () => { $("script").value = ""; $("script").focus(); };
+$("script").oninput = () => store.set("vp.script", $("script").value);
+$("size").oninput = () => { fs = +$("size").value; store.set("vp.size", fs); };
+$("mirror").onchange = () => store.set("vp.mirror", $("mirror").checked);
+$("lang").onchange = () => store.set("vp.lang", $("lang").value);
+$("startBtn").onclick = () => {
+  const t = $("script").value.trim();
+  if (!t) { $("script").focus(); return; }
+  store.set("vp.script", $("script").value);
+  build(t);
+  $("setup").hidden = true;
+  $("prompter").hidden = false;
+  scroller.scrollTop = 0;
+  setCursor(0, true);
+  updateModeUi();
+};
+
+function build(text) {
+  textEl.innerHTML = "";
+  textEl.classList.toggle("mirror", $("mirror").checked);
+  document.documentElement.style.setProperty("--fs", fs + "px");
+  words = []; norms = [];
+  for (const para of text.split(/\n\s*\n/)) {
+    if (!para.trim()) continue;
+    const p = document.createElement("p");
+    for (const tok of para.split(/(\s+)/)) {
+      if (!tok) continue;
+      if (/^\s+$/.test(tok)) { p.appendChild(document.createTextNode(" ")); continue; }
+      const span = document.createElement("span");
+      span.textContent = tok;
+      const parts = tokenize(tok);
+      if (parts.length) span.dataset.i = words.length;
+      for (const n of parts) { words.push({ el: span, norm: n }); norms.push(n); }
+      p.appendChild(span);
+    }
+    textEl.appendChild(p);
+  }
+  shownCursor = -1;
+}
+
+function setCursor(c, allowBack) {
+  c = Math.max(0, Math.min(words.length, c));
+  if (!allowBack && c <= cursor && shownCursor === cursor) return;
+  cursor = c;
+  // Repaint only the range that changed.
+  const from = shownCursor < 0 ? 0 : Math.min(shownCursor, cursor);
+  const to = shownCursor < 0 ? words.length : Math.max(shownCursor, cursor) + 1;
+  for (let i = from; i < Math.min(to, words.length); i++) {
+    words[i].el.classList.toggle("read", i < cursor);
+    words[i].el.classList.remove("now");
+  }
+  if (words[cursor]) words[cursor].el.classList.add("now");
+  shownCursor = cursor;
+  $("progress").textContent = words.length ? Math.round((100 * cursor) / words.length) + "%" : "0%";
+  if (cursor >= words.length && playing) { pause(); setStatus("Finished", false); }
+}
+
+function lineY() { return scroller.clientHeight * 0.33; }
+function cursorEl() { return words.length ? words[Math.min(cursor, words.length - 1)].el : null; }
+function wordAtLine() {
+  const y = scroller.scrollTop + lineY();
+  for (let i = 0; i < words.length; i++) {
+    const el = words[i].el;
+    if (el.offsetTop + el.offsetHeight >= y) return i;
+  }
+  return words.length;
+}
+
+// Scrolling: ease toward the current word so the pace follows the reader.
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(64, now - last); last = now;
+  if (playing && !$("prompter").hidden) {
+    if (mode === "voice") {
+      const el = cursorEl();
+      if (el) {
+        const target = el.offsetTop + el.offsetHeight / 2 - lineY();
+        const k = 1 - Math.exp(-dt / 320);
+        scroller.scrollTop += (target - scroller.scrollTop) * k;
+      }
+    } else {
+      scroller.scrollTop += (speed * dt) / 1000;
+      const i = wordAtLine();
+      if (i !== cursor) setCursor(i, true);
+      if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2) { pause(); setStatus("Finished", false); }
+    }
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// Listening
+function startRec() {
+  rec = new SR();
+  rec.lang = $("lang").value;
+  rec.continuous = true;
+  rec.interimResults = true;
+  rec.maxAlternatives = 1;
+  heard = carry.slice();
+  rec.onresult = (e) => {
+    let t = "";
+    for (let i = 0; i < e.results.length; i++) t += " " + e.results[i][0].transcript;
+    heard = carry.concat(tokenize(t));
+    const next = advance(norms, cursor, heard.slice(-8));
+    if (next > cursor) setCursor(next);
+  };
+  rec.onerror = (e) => {
+    if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+      wantListening = false; pause();
+      setStatus("Microphone blocked. Allow it in Settings, or switch to Manual.", false);
+    } else if (e.error === "audio-capture") {
+      wantListening = false; pause();
+      setStatus("No microphone found.", false);
+    }
+  };
+  // iPhone ends sessions after short silences: restart quietly while playing.
+  rec.onend = () => {
+    carry = heard.slice(-8);
+    if (wantListening) setTimeout(() => { if (wantListening) { try { startRec(); } catch (err) {} } }, 120);
+  };
+  rec.start();
+}
+function stopRec() {
+  wantListening = false;
+  if (rec) { try { rec.abort(); } catch (e) {} rec = null; }
+}
+
+function setStatus(text, live) {
+  $("statusText").textContent = text;
+  $("status").classList.toggle("live", !!live);
+}
+
+async function keepAwake() {
+  try { if ("wakeLock" in navigator) wakeLock = await navigator.wakeLock.request("screen"); } catch (e) {}
+}
+function releaseAwake() { try { wakeLock && wakeLock.release(); } catch (e) {} wakeLock = null; }
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && playing) keepAwake();
+});
+
+function play() {
+  if (cursor >= words.length) setCursor(0, true);
+  if (userMoved) { setCursor(wordAtLine(), true); userMoved = false; }
+  playing = true;
+  $("playIcon").hidden = true; $("pauseIcon").hidden = false;
+  $("playBtn").setAttribute("aria-label", "Pause");
+  keepAwake();
+  if (mode === "voice") {
+    carry = [];
+    wantListening = true;
+    try { startRec(); setStatus("Listening", true); }
+    catch (e) { setStatus("Could not start listening.", false); }
+  } else {
+    setStatus("Scrolling", true);
+  }
+}
+function pause() {
+  playing = false;
+  stopRec();
+  releaseAwake();
+  $("playIcon").hidden = false; $("pauseIcon").hidden = true;
+  $("playBtn").setAttribute("aria-label", "Play");
+  setStatus("Paused", false);
+}
+
+$("playBtn").onclick = () => (playing ? pause() : play());
+$("backBtn").onclick = () => { pause(); $("prompter").hidden = true; $("setup").hidden = false; };
+$("topBtn").onclick = () => { const was = playing; pause(); scroller.scrollTop = 0; userMoved = false; setCursor(0, true); if (was) play(); };
+$("modeBtn").onclick = () => {
+  if (!SR) return;
+  const was = playing; pause();
+  mode = mode === "voice" ? "manual" : "voice";
+  updateModeUi();
+  if (was) play();
+};
+// The right-hand pair sizes the text in voice mode and sets the speed in manual mode.
+$("slowerBtn").onclick = () => adjust(-1);
+$("fasterBtn").onclick = () => adjust(1);
+function adjust(dir) {
+  if (mode === "manual") {
+    speed = Math.max(10, Math.min(300, speed + dir * 10));
+    store.set("vp.speed", speed);
+    $("modeBtn").textContent = "Manual " + speed;
+  } else {
+    fs = Math.max(24, Math.min(72, fs + dir * 4));
+    store.set("vp.size", fs);
+    document.documentElement.style.setProperty("--fs", fs + "px");
+  }
+}
+function updateModeUi() {
+  const manual = mode === "manual";
+  $("modeBtn").textContent = manual ? "Manual " + speed : "Voice";
+  $("modeBtn").setAttribute("aria-label", manual ? "Switch to voice" : "Switch to manual scrolling");
+  $("slowerBtn").textContent = manual ? $("slowerBtn").dataset.manual : $("slowerBtn").dataset.voice;
+  $("fasterBtn").textContent = manual ? $("fasterBtn").dataset.manual : $("fasterBtn").dataset.voice;
+  $("slowerBtn").setAttribute("aria-label", manual ? "Slower" : "Smaller text");
+  $("fasterBtn").setAttribute("aria-label", manual ? "Faster" : "Larger text");
+}
+
+// Tap to pause; while paused, tap a word to jump there or drag to reposition.
+scroller.addEventListener("click", (e) => {
+  if (playing) { pause(); return; }
+  const span = e.target.closest("span[data-i]");
+  if (span) { setCursor(+span.dataset.i, true); userMoved = false; snapToCursor(); }
+});
+for (const ev of ["touchmove", "wheel"]) {
+  scroller.addEventListener(ev, () => { if (!playing) userMoved = true; }, { passive: true });
+}
+function snapToCursor() {
+  const el = cursorEl(); if (!el) return;
+  scroller.scrollTo({ top: el.offsetTop + el.offsetHeight / 2 - lineY(), behavior: "smooth" });
+}
+</script>
+</body>
+</html>
